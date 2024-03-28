@@ -38,12 +38,7 @@ node {
 		))
 		pastFailedJobsJson = sh(returnStdout: true, script: '''#!/usr/bin/env bash
 			set -Eeuo pipefail -x
-
-			if ! json="$(wget -qO- "$JOB_URL/lastSuccessfulBuild/artifact/pastFailedJobs.json")"; then
-				echo >&2 'failed to get pastFailedJobs.json'
-				json='{}'
-			fi
-			jq <<<"$json" '.'
+			./.scripts/trigger.sh -o fetchFailedJson
 		''').trim()
 	}
 
@@ -55,25 +50,7 @@ node {
 			]) {
 				// using pastFailedJobsJson, sort the needs_build queue so that failing builds always live at the bottom of the queue
 				queueJson = sh(returnStdout: true, script: '''
-					jq -L.scripts '
-						include "meta";
-						(env.pastFailedJobsJson | fromjson) as $pastFailedJobs
-						| [
-							.[]
-							| select(
-								needs_build
-								and (
-									.build.arch as $arch
-									| if env.BASHBREW_ARCH == "gha" then
-										[ "amd64", "i386", "windows-amd64" ]
-									else [ env.BASHBREW_ARCH ] end
-									| index($arch)
-								)
-							)
-						]
-						# this Jenkins job exports a JSON file that includes the number of attempts so far per failing buildId so that this can sort by attempts which means failing builds always live at the bottom of the queue (sorted by the number of times they have failed, so the most failing is always last)
-						| sort_by($pastFailedJobs[.buildId].count // 0)
-					' builds.json
+					./.scripts/trigger.sh -o sortedBuildQueue -b ./builds.json
 				''').trim()
 			}
 		}
@@ -94,36 +71,16 @@ node {
 					credentialsId: 'github-access-token-docker-library-bot-meta',
 				),
 			]) {
-				for (buildObj in queue) {
-					def identifier = buildObj.source.tags[0] + ' (' + buildObj.build.arch + ')'
-					def json = writeJSON(json: buildObj, returnText: true)
-					withEnv([
-						'json=' + json,
-					]) {
-						stage(identifier) {
-							echo(json) // for debugging/data purposes
-
-							sh '''#!/usr/bin/env bash
-								set -Eeuo pipefail -x
-
-								# https://docs.github.com/en/free-pro-team@latest/rest/actions/workflows?apiVersion=2022-11-28#create-a-workflow-dispatch-event
-								payload="$(
-									jq <<<"$json" -L.scripts '
-										include "jenkins";
-										gha_payload
-									'
-								)"
-
-								set +x
-								curl -fL \
-									-X POST \
-									-H 'Accept: application/vnd.github+json' \
-									-H "Authorization: Bearer $GH_TOKEN" \
-									-H 'X-GitHub-Api-Version: 2022-11-28' \
-									https://api.github.com/repos/docker-library/meta/actions/workflows/build.yml/dispatches \
-									-d "$payload"
-							'''
-						}
+				withEnv([
+					'queueJson=' + queueJson,
+				]) {
+					stage('Trigger GHA') {
+						//echo(queueJson) // for debugging/data purposes
+						sh '''#!/usr/bin/env bash
+							set -Eeuo pipefail -x
+							curlsToRun="$("./.scripts/trigger.sh" -o processGHA <<<"$queueJson")"
+							eval "$curlsToRun"
+						'''
 					}
 				}
 			}
