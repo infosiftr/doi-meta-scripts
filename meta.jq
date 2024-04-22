@@ -71,6 +71,20 @@ def pull_command:
 	end
 ;
 # input: "build" object (with "buildId" top level key)
+# output: buildkit "source policy" (digest pinning, unexpected external images denial)
+def buildkit_source_policy:
+	# EXPERIMENTAL_BUILDKIT_SOURCE_POLICY: https://github.com/docker/buildx/pull/1628
+	{ rules: [
+		{ action: "DENY", selector: { identifier: "*" } },
+		{ action: "ALLOW", selector: { identifier: "local://dockerfile" } },
+		# TODO put in the real images (based on the "--build-context" code below; HOWEVER, this selector requires a full "canonical" reference including a wildcard for SHA256... 🙃)
+		{ action: "CONVERT", selector: { identifier: "docker-image://docker.io/library/bash:latest@*" }, updates: { identifier: "docker-image://docker.io/library/debian:bullseye-slim" } },
+		{ action: "ALLOW", selector: { identifier: "docker-image://docker.io/library/debian:bullseye-slim" } },
+		# TODO figure out whether this also applies to the frontend/SBOM generator (which would mean those need to be plumbed in here instead of relying on environment variables from the other script)
+		empty
+	] }
+;
+# input: "build" object (with "buildId" top level key)
 # output: string "giturl" ("https://github.com/docker-library/golang.git#commit:directory), used for "docker buildx build giturl"
 def git_build_url:
 	.source.entry
