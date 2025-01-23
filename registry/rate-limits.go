@@ -1,6 +1,9 @@
 package registry
 
 import (
+	"errors"
+	"io"
+	"net"
 	"net/http"
 	"slices"
 	"time"
@@ -38,27 +41,43 @@ func (d *rateLimitedRetryingRoundTripper) RoundTrip(req *http.Request) (*http.Re
 			return nil, err
 		}
 
+		doRetry := false
+
 		// in theory, this RoundTripper we're invoking should close req.Body (per the RoundTripper contract), so we shouldn't have to 🤞
 		res, err := d.roundTripper.RoundTrip(req)
 		if err != nil {
-			return nil, err
-		}
-
-		doRetry := false
-
-		if res.StatusCode == 429 {
-			// just eat all available tokens and starve out the rate limiter (any 429 means we need to slow down, so our whole "bucket" is shot)
-			for i := d.limiter.Tokens(); i > 0; i-- {
-				_ = d.limiter.Allow()
+			// for some (transport) errors, we *do* want to retry 👀
+			for _, retryErr := range []error{
+				// various forms of EOF / prematurely closed connection
+				io.EOF,
+				io.ErrClosedPipe,
+				io.ErrUnexpectedEOF,
+				net.ErrClosed,
+				// TODO need to determine if this would actually catch the ones we see most often -- any error that happens after the initial request (for example, EOF *during* write of the PUT body) will not surface here
+			} {
+				doRetry = errors.Is(err, retryErr)
+				if doRetry {
+					break
+				}
 			}
-			doRetry = true // TODO maximum number of retries? (perhaps a deadline instead?  req.WithContext to inject a deadline?  👀)
-		}
+			if !doRetry {
+				return nil, err
+			}
+		} else {
+			if res.StatusCode == 429 {
+				// just eat all available tokens and starve out the rate limiter (any 429 means we need to slow down, so our whole "bucket" is shot)
+				for i := d.limiter.Tokens(); i > 0; i-- {
+					_ = d.limiter.Allow()
+				}
+				doRetry = true // TODO maximum number of retries? (perhaps a deadline instead?  req.WithContext to inject a deadline?  👀)
+			}
 
-		// certain status codes should result in a few auto-retries (especially with the automatic retry delay this injects), but up to a limit so we don't contribute to the "thundering herd" too much in a serious outage
-		if maxTry50X > 1 && slices.Contains([]int{500, 502, 503, 504}, res.StatusCode) {
-			maxTry50X--
-			doRetry = true
-			// no need to eat up the rate limiter tokens as we do for 429 because this is not a rate limiting error (and we have the "requestRetryLimiter" that separately limits our retries of *this* request)
+			// certain status codes should result in a few auto-retries (especially with the automatic retry delay this injects), but up to a limit so we don't contribute to the "thundering herd" too much in a serious outage
+			if maxTry50X > 1 && slices.Contains([]int{500, 502, 503, 504}, res.StatusCode) {
+				maxTry50X--
+				doRetry = true
+				// no need to eat up the rate limiter tokens as we do for 429 because this is not a rate limiting error (and we have the "requestRetryLimiter" that separately limits our retries of *this* request)
+			}
 		}
 
 		if doRetry {
