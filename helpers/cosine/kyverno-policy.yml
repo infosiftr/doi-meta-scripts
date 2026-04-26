@@ -44,6 +44,13 @@ spec:
           # so, we have to specify a rekor URL that will get queried and then the results of ignored, because that's how the Kyverno implementation works
           # in fact, the image verifications happen *faster* if this value is invalid because the Rekor validation fails faster (and then the failure gets ignored)
           url: https://this.is.a.totally.bogus.domain.that.should.not.exist/
+  # without matchConstraints being explicit about matching "pods", we don't "autogen" -- specifying this explicitly enables "autogen" so we get all Deployments, DaemonSets, StatefulSets, ReplicaSets, Jobs, CronJobs, etc.
+  matchConstraints:
+    resourceRules:
+      - operations: ["CREATE", "UPDATE"] # this isn't strictly necessary, but we don't want/need to validate on DELETE or CONNECT so it's a useful constraint
+        apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
   variables:
     - name: allImages
       expression: |
