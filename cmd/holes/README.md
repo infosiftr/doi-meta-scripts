@@ -27,3 +27,17 @@ For architectures with multiple OS-version variants under the same tag (e.g. `wi
 ## Git history search
 
 The git history of the meta repo contains every prior `builds.json` state.  Walking it backward is the only source of fallback data that does not require live registry queries (which are expensive enough that put-shared runs only every ~3 hours).  The walk must be a single linear backward pass over *all* holes simultaneously -- exponential or binary search is not safe because a tag can be added, fully built, *and* removed within a gap of skipped commits, leaving no evidence on either side of the jump.
+
+## Performance
+
+Blob enumeration uses `git log --raw` (a single native-git command) rather than go-git's commit-graph traversal, which decompresses every commit and tree object in-process and is substantially slower.
+
+Blobs are parsed in parallel (`runtime.NumCPU()` workers, each with its own `git cat-file --batch` subprocess to avoid go-git's internal pack-file mutex).  A coordinator goroutine cancels the scan the moment every initially-unfilled hole has been filled, so recently-built tags cost only a few blobs' worth of work.
+
+An optional third argument `prev-holes.json` pre-fills holes from the previous run's output before touching git history.  The previous `holes.json` is a valid cache because any `(tag, arch)` that was a hole on the prior run and is still a hole now can reuse the same fallback OCI index -- and as holes get resolved during builds they disappear from the current holes set (resolved in `builds.json`) so the cache never returns data for a hole that no longer exists.  On a warm run (most holes already in the cache) the git history search only covers newly-appeared holes, which are typically a small fraction of the total.  Typical invocation:
+
+```console
+$ holes sources.json builds.json holes.json > holes-new.json && mv holes-new.json holes.json
+```
+
+Setting `$HOLES_SINCE` to any expression `git log --since` understands (eg `2.weeks`, `30.days`, `2024-01-01`) limits the history search to that window.  Holes still unfilled after the window are left empty (library deploy skips them).  This trades correctness -- a tag last resolved before the cutoff gets no fallback -- for a bounded worst-case runtime.  It is most useful when brand-new tags (which can never be filled from history) regularly appear in large batches and would otherwise force a full scan by preventing the all-holes-filled early exit.  It composes well with the cache: the cache handles previously-known holes instantly, and `$HOLES_SINCE` bounds the search for any new ones.
