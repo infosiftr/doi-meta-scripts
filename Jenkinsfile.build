@@ -13,6 +13,7 @@ properties([
 		string(name: 'buildId', trim: true),
 		string(name: 'identifier', trim: true, description: '(optional) used to set <code>currentBuild.displayName</code> to a meaningful value earlier'),
 		string(name: 'windowsVersion', trim: true, description: '(optional) used to select the Windows node (2025, 2022, etc)'),
+		booleanParam(name: 'cross', defaultValue: false, description: 'if checked, allow this build to run on a "cross-ARCH" node in addition to the usual "multiarch-ARCH" node'),
 	]),
 ])
 
@@ -29,6 +30,10 @@ if (params.identifier) {
 def nodeExpression = 'multiarch-' + env.BASHBREW_ARCH
 if (params.windowsVersion) {
 	nodeExpression += ' && windows-' + params.windowsVersion
+}
+if (params.cross) {
+	// widen eligibility instead of narrowing it -- a native node is still just as eligible as before
+	nodeExpression = '(' + nodeExpression + ') || cross-' + env.BASHBREW_ARCH
 }
 if (env.BASHBREW_ARCH.startsWith('windows-') && ! params.windowsVersion) {
 	error(env.BASHBREW_ARCH + ' specified, but no Windows OS version (like 2025)')
@@ -158,8 +163,12 @@ node(nodeExpression) { ansiColor('xterm') {
 					withEnv(['DOCKER_CONFIG=' + workspace + '/.docker']) {
 						dir(env.DOCKER_CONFIG) { deleteDir() }
 
+						// this node might have matched "nodeExpression" via the native "multiarch-ARCH" label or (if "cross" was requested) the "cross-ARCH" label -- only trust the native credential if this node actually carries the native label itself (regardless of why the scheduler picked it)
+						def onNativeNode = env.NODE_LABELS?.tokenize(' ')?.contains('multiarch-' + env.BASHBREW_ARCH)
+						def credArch = env.BASHBREW_ARCH + (onNativeNode ? '' : '-cross')
+
 						withCredentials([usernamePassword(
-							credentialsId: 'docker-hub-' + env.BASHBREW_ARCH,
+							credentialsId: 'docker-hub-' + credArch,
 							usernameVariable: 'DOCKER_USERNAME',
 							passwordVariable: 'DOCKER_PASSWORD',
 						)]) {

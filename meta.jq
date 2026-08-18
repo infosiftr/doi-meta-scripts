@@ -6,20 +6,6 @@ include "doi";
 def needs_build:
 	.build.resolved == null
 ;
-# input: "build" object (with "buildId" top level key)
-# output: string ("Builder", but normalized)
-def normalized_builder:
-	.build.arch as $arch
-	| .source.entries[0].Builder
-	| if . == "" then
-		if $arch | startswith("windows-") then
-			# https://github.com/microsoft/Windows-Containers/issues/34
-			"classic"
-		else
-			"buildkit"
-		end
-	else . end
-;
 # input: "docker.io/library/foo:bar"
 # output: "foo:bar"
 def normalize_ref_to_docker:

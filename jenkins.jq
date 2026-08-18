@@ -1,3 +1,4 @@
+include "doi";
 include "meta";
 
 # input: list of build objects i.e., builds.json
@@ -64,6 +65,7 @@ def get_arch_queue($arch):
 		)
 		# add friendly windows os version (2022, 2025)
 		| . + windows_version
+		| . + (if build_can_cross then { cross: true } else {} end)
 		| .identifier = .source.arches[.build.arch].tags[0]
 	)
 ;
