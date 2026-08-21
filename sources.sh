@@ -95,7 +95,7 @@ bashbrew_cat() {
 								"platform": {{ ociPlatform $a | json }},
 								"parents": [ ],
 								"hostArch": null,
-								"crossHostArchitectures": null
+								"crossHostArches": null
 							}
 						}
 					}
@@ -305,7 +305,7 @@ jq <<<"$sources" --tab --argjson pins "$externalPinsJson" '
 				)
 			)
 			| ([ .value.parents[] | select(.Kind == "FROM" and .Platform == "$BUILDPLATFORM") ]) as $buildPinned
-			| .value.crossHostArchitectures = (
+			| .value.crossHostArches = (
 				# null: no $BUILDPLATFORM parents at all, or at least one is not bashbrew-tracked (needs a live registry check, left to cmd/builds)
 				# []: every $BUILDPLATFORM parent *is* tracked but they share no common declared arch -- a real, structural problem, not something a live check would ever fix
 				# otherwise: the actual joint intersection of declared architectures
@@ -322,9 +322,9 @@ jq <<<"$sources" --tab --argjson pins "$externalPinsJson" '
 					end
 				end
 			)
-			# hostArch: $arch itself if there are no $BUILDPLATFORM parents (native trivially *is* the host), or null if crossHostArchitectures could not be computed or came back empty -- keeping "null" exclusive to "cmd/builds has more to do, or this can never work" makes it a precise, filterable signal instead of also meaning "not applicable"
+			# hostArch: $arch itself if there are no $BUILDPLATFORM parents (native trivially *is* the host), or null if crossHostArches could not be computed or came back empty -- keeping "null" exclusive to "cmd/builds has more to do, or this can never work" makes it a precise, filterable signal instead of also meaning "not applicable"
 			| .value.hostArch = (
-				.value.crossHostArchitectures
+				.value.crossHostArches
 				| if ($buildPinned | length) == 0 then $arch
 				elif . == null then null
 				elif index($arch) then $arch

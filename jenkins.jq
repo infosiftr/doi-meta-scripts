@@ -65,7 +65,8 @@ def get_arch_queue($arch):
 		)
 		# add friendly windows os version (2022, 2025)
 		| . + windows_version
-		| . + (if build_can_cross then { cross: true } else {} end)
+		# crossHostArches: the real (build-side) fully-resolved set, but only surfaced at all if policy (build_can_cross) allows it -- .build.crossHostArches existing is a structural fact about the Dockerfile, independent of whether we're actually willing to schedule this as a cross build
+		| .crossHostArches = (if build_can_cross then (.build.crossHostArches // []) else [] end)
 		| .identifier = .source.arches[.build.arch].tags[0]
 	)
 ;
