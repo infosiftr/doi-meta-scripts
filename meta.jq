@@ -97,7 +97,7 @@ def build_annotations($buildUrl):
 		"com.docker.official-images.bashbrew.arch": .build.arch,
 	}
 	+ (
-		.source.arches[.build.arch].lastStageFrom as $lastStageFrom
+		last(.source.arches[.build.arch].dockerfileParents[] | select(.Kind == "FROM") | .From) as $lastStageFrom
 		| if $lastStageFrom then
 			.build.parents[$lastStageFrom] as $lastStageDigest
 			| {
